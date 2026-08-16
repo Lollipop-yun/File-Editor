@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>文件</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="storage.js"></script>
+<style>
+  :root{
+    --bg:#F4F4F6;
+    --card:#FFFFFF;
+    --text:#1C1C1E;
+    --text-2:#8A8A8E;
+    --text-3:#C6C6C8;
+    --border:rgba(0,0,0,0.06);
+    --accent:#1C1C1E;
+    --accent-soft:#EFEFF1;
+    --blue:#0A84FF;
+    --danger:#FF3B30;
+    --radius-l:22px;
+    --radius-m:16px;
+    --radius-s:11px;
+    --shadow: 0 1px 2px rgba(0,0,0,0.03), 0 8px 24px -8px rgba(0,0,0,0.10);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overscroll-behavior:none;
+  }
+  #app{ position:relative; height:100vh; height:100dvh; overflow:hidden; }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    padding:calc(env(safe-area-inset-top,0px) + 18px) 20px 6px 20px;
+    background:linear-gradient(var(--bg), var(--bg) 85%, transparent);
+  }
+  .topbar h1{
+    margin:0 0 14px 0;
+    font-size:34px;
+    font-weight:700;
+    letter-spacing:-0.02em;
+  }
+  .search{
+    display:flex; align-items:center; gap:8px;
+    background:var(--accent-soft);
+    border-radius:var(--radius-s);
+    padding:9px 12px;
+    color:var(--text-2);
+    font-size:15px;
+  }
+  .search svg{flex:none; opacity:0.6;}
+  .search input{
+    border:none; outline:none; background:transparent; width:100%;
+    font-size:15px; color:var(--text); font-family:inherit;
+  }
+  .search input::placeholder{color:var(--text-2);}
+
+  /* ---------- Tabs ---------- */
+  .tabs{
+    display:flex; gap:8px; overflow-x:auto; padding:14px 20px 12px 20px;
+    scrollbar-width:none;
+  }
+  .tabs::-webkit-scrollbar{display:none;}
+  .tab{
+    flex:none;
+    padding:8px 16px;
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:999px;
+    font-size:14px;
+    font-weight:590;
+    color:var(--text-2);
+    white-space:nowrap;
+    transition:all .18s ease;
+  }
+  .tab.active{
+    background:var(--accent);
+    color:#fff;
+    border-color:var(--accent);
+  }
+
+  /* ---------- File list ---------- */
+  .list{
+    height:calc(100% - 168px);
+    overflow-y:auto;
+    padding:4px 20px calc(120px + var(--safe-b)) 20px;
+  }
+  .empty{
+    margin-top:80px;
+    text-align:center;
+    color:var(--text-2);
+  }
+  .empty .glyph{font-size:44px; margin-bottom:10px; opacity:.5;}
+  .empty p{font-size:15px; margin:4px 0;}
+  .empty .sub{font-size:13px; color:var(--text-3);}
+
+  .file-card{
+    display:flex; align-items:center; gap:12px;
+    background:var(--card);
+    border-radius:var(--radius-m);
+    padding:14px;
+    margin-bottom:10px;
+    box-shadow:var(--shadow);
+    animation:rise .28s ease both;
+  }
+  @keyframes rise{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+  .file-icon{
+    flex:none; width:42px; height:42px; border-radius:12px;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--accent-soft);
+    font-size:18px;
+  }
+  .file-main{flex:1; min-width:0;}
+  .file-name{
+    font-size:16px; font-weight:600; letter-spacing:-0.01em;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .file-meta{
+    font-size:12.5px; color:var(--text-2); margin-top:2px;
+    display:flex; gap:6px; align-items:center;
+  }
+  .file-meta .dot{width:3px; height:3px; border-radius:50%; background:var(--text-3);}
+  .cat-chip{
+    font-size:11px; font-weight:600; color:var(--text-2);
+    background:var(--accent-soft); padding:2px 8px; border-radius:999px;
+  }
+  .file-more{
+    flex:none; width:32px; height:32px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--text-3); font-size:18px; border:none; background:transparent;
+  }
+  .file-more:active{background:var(--accent-soft);}
+
+  /* ---------- FAB ---------- */
+  .fab-wrap{
+    position:absolute; right:22px; bottom:calc(28px + var(--safe-b)); z-index:30;
+    display:flex; flex-direction:column; align-items:flex-end; gap:12px;
+  }
+  .fab-menu{
+    display:flex; flex-direction:column; gap:10px;
+    opacity:0; pointer-events:none; transform:translateY(8px) scale(.96);
+    transition:all .2s cubic-bezier(.34,1.3,.5,1);
+  }
+  .fab-menu.open{opacity:1; pointer-events:auto; transform:translateY(0) scale(1);}
+  .fab-opt{
+    display:flex; align-items:center; gap:10px;
+    background:var(--card); box-shadow:var(--shadow);
+    border-radius:999px; padding:10px 16px 10px 14px;
+    font-size:14.5px; font-weight:600; color:var(--text);
+    border:none;
+  }
+  .fab-opt .ic{width:26px; height:26px; border-radius:50%; background:var(--accent-soft); display:flex; align-items:center; justify-content:center; font-size:14px;}
+  .fab{
+    width:58px; height:58px; border-radius:50%;
+    background:var(--accent); color:#fff; border:none;
+    box-shadow:0 10px 24px -6px rgba(0,0,0,0.35);
+    font-size:26px; display:flex; align-items:center; justify-content:center;
+    transition:transform .18s ease;
+  }
+  .fab:active{transform:scale(0.92);}
+  .fab.rot{transform:rotate(45deg);}
+
+  /* ---------- Editor ---------- */
+  .editor{
+    position:absolute; inset:0; background:var(--bg);
+    transform:translateY(100%); transition:transform .32s cubic-bezier(.32,.72,0,1);
+    z-index:50; display:flex; flex-direction:column;
+  }
+  .editor.open{transform:translateY(0);}
+  .editor-top{
+    display:flex; align-items:center; gap:10px;
+    padding:calc(env(safe-area-inset-top,0px) + 14px) 14px 10px 14px;
+    background:var(--bg);
+    border-bottom:1px solid var(--border);
+  }
+  .icon-btn{
+    border:none; background:transparent; color:var(--blue);
+    font-size:16px; font-weight:500; padding:6px 6px;
+    display:inline-flex; align-items:center; justify-content:center; gap:2px;
+    white-space:nowrap; flex:none;
+  }
+  .icon-btn:active{opacity:.5;}
+  .icon-btn svg{display:block;}
+  .name-input{
+    flex:1; border:none; background:transparent; outline:none;
+    font-size:17px; font-weight:700; text-align:center; color:var(--text);
+    font-family:inherit;
+  }
+  .search-bar{
+    display:none; align-items:center; gap:8px;
+    margin:8px 16px 0 16px;
+    background:var(--accent-soft);
+    border-radius:var(--radius-s);
+    padding:8px 10px;
+  }
+  .search-bar svg{flex:none; opacity:0.6;}
+  .search-bar input{
+    flex:1; min-width:0; border:none; outline:none; background:transparent;
+    font-size:15px; color:var(--text); font-family:inherit;
+  }
+  .search-bar input::placeholder{color:var(--text-2);}
+  #searchCount{
+    flex:none; font-size:12.5px; color:var(--text-2); font-variant-numeric:tabular-nums;
+    padding:0 2px;
+  }
+  .search-nav{
+    flex:none; display:flex; align-items:center; gap:2px;
+  }
+  .search-nav button{
+    border:none; background:transparent; color:var(--text);
+    width:26px; height:26px; border-radius:50%; font-size:15px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .search-nav button:disabled{color:var(--text-3);}
+  .search-nav button:active:not(:disabled){background:rgba(0,0,0,0.06);}
+  .search-done{
+    flex:none; border:none; background:transparent; color:var(--blue);
+    font-size:14.5px; font-weight:600; padding:0 2px 0 6px;
+  }
+  .cat-row{
+    display:flex; align-items:center; gap:8px;
+    padding:10px 16px; overflow-x:auto; scrollbar-width:none;
+  }
+  .cat-row::-webkit-scrollbar{display:none;}
+  .cat-pill{
+    flex:none; font-size:12.5px; font-weight:600; color:var(--text-2);
+    background:var(--card); border:1px solid var(--border);
+    padding:6px 12px; border-radius:999px;
+  }
+  .cat-pill.active{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .cat-pill.add{color:var(--blue); border-style:dashed;}
+  textarea#editorBody{
+    flex:1; width:100%; border:none; outline:none; resize:none;
+    background:transparent; color:var(--text);
+    font-family:-apple-system, "PingFang SC", sans-serif;
+    font-size:16.5px; line-height:1.65;
+    padding:6px 20px calc(20px + var(--safe-b)) 20px;
+  }
+  .editor-bottom{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 20px calc(14px + var(--safe-b)) 20px;
+    border-top:1px solid var(--border);
+    font-size:12.5px; color:var(--text-2);
+  }
+  .export-btn{
+    border:none; background:var(--accent); color:#fff;
+    font-size:14px; font-weight:600;
+    padding:10px 18px; border-radius:999px;
+    display:flex; align-items:center; gap:6px;
+  }
+  .export-btn:active{opacity:.75;}
+
+  /* ---------- Sheets / overlays ---------- */
+  .scrim{
+    position:absolute; inset:0; background:rgba(0,0,0,0.32);
+    opacity:0; pointer-events:none; transition:opacity .22s ease; z-index:60;
+  }
+  .scrim.show{opacity:1; pointer-events:auto;}
+  .sheet{
+    position:absolute; left:0; right:0; bottom:0; z-index:61;
+    background:var(--bg);
+    border-radius:20px 20px 0 0;
+    padding:10px 14px calc(20px + var(--safe-b)) 14px;
+    transform:translateY(100%); transition:transform .28s cubic-bezier(.32,.72,0,1);
+    box-shadow:0 -10px 30px rgba(0,0,0,0.15);
+  }
+  .sheet.show{transform:translateY(0);}
+  .sheet-handle{width:36px; height:5px; background:var(--text-3); border-radius:3px; margin:6px auto 12px auto;}
+  .sheet-title{text-align:center; font-size:13px; color:var(--text-2); margin-bottom:10px; padding:0 10px;}
+  .sheet-group{background:var(--card); border-radius:var(--radius-m); overflow:hidden; margin-bottom:10px;}
+  .sheet-item{
+    width:100%; border:none; background:transparent; text-align:center;
+    padding:15px; font-size:16.5px; color:var(--blue); font-weight:500;
+    border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .sheet-item:last-child{border-bottom:none;}
+  .sheet-item.danger{color:var(--danger);}
+  .sheet-item.cancel{font-weight:600; color:var(--text);}
+  .sheet-item small{color:var(--text-2); font-weight:400; font-size:12px;}
+
+  /* ---------- Modal (new file / rename category) ---------- */
+  .modal{
+    position:absolute; left:50%; top:50%; z-index:71;
+    transform:translate(-50%,-50%) scale(.92); opacity:0; pointer-events:none;
+    background:var(--card); border-radius:18px; width:min(300px, 82vw);
+    box-shadow:var(--shadow); transition:all .18s ease; overflow:hidden;
+  }
+  .modal.show{opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1);}
+  .modal-body{padding:18px 18px 12px 18px; text-align:center;}
+  .modal-body h3{margin:0 0 4px 0; font-size:16px;}
+  .modal-body p{margin:0 0 12px 0; font-size:12.5px; color:var(--text-2);}
+  .modal-body input, .modal-body select{
+    width:100%; border:none; background:var(--accent-soft);
+    border-radius:10px; padding:10px 12px; font-size:15px; margin-top:8px;
+    outline:none; font-family:inherit; color:var(--text);
+  }
+  .modal-actions{display:flex; border-top:1px solid var(--border);}
+  .modal-actions button{
+    flex:1; border:none; background:transparent; padding:13px;
+    font-size:15.5px; color:var(--blue);
+  }
+  .modal-actions button.primary{font-weight:700; border-left:1px solid var(--border);}
+  .modal-actions button.cancel{color:var(--text-2);}
+
+  .toast{
+    position:absolute; left:50%; bottom:110px; transform:translateX(-50%) translateY(10px);
+    background:rgba(28,28,30,0.9); color:#fff; font-size:13.5px; font-weight:500;
+    padding:10px 18px; border-radius:999px; z-index:80; opacity:0;
+    transition:all .25s ease; pointer-events:none; white-space:nowrap;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="topbar">
+    <h1>文件</h1>
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="searchInput" placeholder="搜索文件" oninput="renderList()">
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+
+  <div class="list" id="list"></div>
+
+  <div class="fab-wrap">
+    <div class="fab-menu" id="fabMenu">
+      <button class="fab-opt" onclick="triggerImport()"><span class="ic">⇩</span>从手机导入</button>
+      <button class="fab-opt" onclick="openNewFileModal()"><span class="ic">＋</span>新建文件</button>
+    </div>
+    <button class="fab" id="fabBtn" onclick="toggleFab()">＋</button>
+  </div>
+
+  <input type="file" id="importInput" multiple accept=".txt,.md,.markdown,.csv,.json,.html,.htm,.log,text/plain" onchange="handleImport(event)">
+
+  <!-- Editor -->
+  <div class="editor" id="editor">
+    <div class="editor-top">
+      <button class="icon-btn" onclick="closeEditor()">‹ 完成</button>
+      <input id="nameInput" class="name-input" oninput="scheduleSave()">
+      <button class="icon-btn" onclick="toggleSearchBar()" aria-label="搜索">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button class="icon-btn" onclick="openFileMenu()">•••</button>
+    </div>
+    <div class="search-bar" id="searchBar">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="searchTermInput" placeholder="搜索文档中的文字" oninput="onSearchInput()" onkeydown="onSearchKeydown(event)">
+      <span id="searchCount">0/0</span>
+      <div class="search-nav">
+        <button id="searchPrevBtn" onclick="jumpMatch(-1)" disabled>‹</button>
+        <button id="searchNextBtn" onclick="jumpMatch(1)" disabled>›</button>
+      </div>
+      <button class="search-done" onclick="closeSearchBar()">完成</button>
+    </div>
+    <div class="cat-row" id="catRow"></div>
+    <textarea id="editorBody" placeholder="开始输入…" oninput="scheduleSave()"></textarea>
+    <div class="editor-bottom">
+      <span id="saveStatus">已保存</span>
+      <button class="export-btn" onclick="openExportSheet()">⇪ 导出</button>
+    </div>
+  </div>
+
+  <div class="scrim" id="scrim" onclick="closeAllOverlays()"></div>
+
+  <!-- File card menu sheet -->
+  <div class="sheet" id="fileMenuSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-group">
+      <button class="sheet-item" onclick="renameCurrentFile()">重命名</button>
+      <button class="sheet-item" onclick="changeCategoryPrompt()">设置分类</button>
+      <button class="sheet-item" onclick="duplicateCurrentFile()">复制文件</button>
+      <button class="sheet-item danger" onclick="deleteCurrentFile()">删除文件</button>
+    </div>
+    <div class="sheet-group">
+      <button class="sheet-item cancel" onclick="closeAllOverlays()">取消</button>
+    </div>
+  </div>
+
+  <!-- Export format sheet -->
+  <div class="sheet" id="exportSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">选择导出格式</div>
+    <div class="sheet-group">
+      <button class="sheet-item" onclick="exportFile('txt')">纯文本 <small>.txt</small></button>
+      <button class="sheet-item" onclick="exportFile('md')">Markdown <small>.md</small></button>
+      <button class="sheet-item" onclick="exportFile('html')">网页 <small>.html</small></button>
+      <button class="sheet-item" onclick="exportFile('pdf')">PDF <small>.pdf</small></button>
+      <button class="sheet-item" onclick="exportFile('docx')">Word 文档 <small>.docx</small></button>
+    </div>
+    <div class="sheet-group">
+      <button class="sheet-item cancel" onclick="closeAllOverlays()">取消</button>
+    </div>
+  </div>
+
+  <!-- New file modal -->
+  <div class="modal" id="newFileModal">
+    <div class="modal-body">
+      <h3>新建文件</h3>
+      <p>输入文件名并选择分类</p>
+      <input id="newFileName" placeholder="文件名称" autocomplete="off">
+      <input id="newFileCategory" placeholder="分类（可留空）" list="catList" autocomplete="off">
+      <datalist id="catList"></datalist>
+    </div>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeModal('newFileModal')">取消</button>
+      <button class="primary" onclick="confirmNewFile()">创建</button>
+    </div>
+  </div>
+
+  <!-- Category set modal (for imported files / change category) -->
+  <div class="modal" id="catModal">
+    <div class="modal-body">
+      <h3>设置分类</h3>
+      <p>相同分类的文件会出现在同一个标签下</p>
+      <input id="catModalInput" placeholder="分类名称" list="catList2" autocomplete="off">
+      <datalist id="catList2"></datalist>
+    </div>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeModal('catModal')">取消</button>
+      <button class="primary" onclick="confirmCategory()">确定</button>
+    </div>
+  </div>
+
+  <!-- Rename modal -->
+  <div class="modal" id="renameModal">
+    <div class="modal-body">
+      <h3>重命名</h3>
+      <input id="renameInput" placeholder="文件名称" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeModal('renameModal')">取消</button>
+      <button class="primary" onclick="confirmRename()">完成</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ---------------- State ---------------- */
+let files = [];           // {id,name,category,content,updatedAt}
+let activeTab = '全部';
+let currentId = null;     // file open in editor
+let saveTimer = null;
+const DEFAULT_CAT = '未分类';
+
+/* ---------------- Storage ---------------- */
+async function loadFiles(){
+  files = loadFilesFromStorage();
+  if(files.length === 0){
+    files.push({
+      id: uid(), name:'欢迎使用', category:'指南',
+      content:'这是你的第一个文件。\n\n· 点击右下角「＋」新建文件，或从手机导入已有文件\n· 点击文件可以编辑内容和文件名\n· 长按「•••」可以设置分类、重命名、删除\n· 编辑完成后点击「导出」，可选择 txt / md / html / pdf / docx',
+      updatedAt: Date.now()
+    });
+    await persist();
+  }
+}
+async function persist(){
+  const ok = saveFilesToStorage(files);
+  setSaveStatus(ok ? '已保存' : '保存失败（存储空间可能已满）');
+}
+function uid(){ return 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+/* ---------------- Init ---------------- */
+(async function init(){
+  await loadFiles();
+  renderTabs();
+  renderList();
+})();
+
+/* ---------------- Tabs ---------------- */
+function getCategories(){
+  const set = new Set(files.map(f => f.category || DEFAULT_CAT));
+  return Array.from(set);
+}
+function renderTabs(){
+  const wrap = document.getElementById('tabs');
+  const cats = getCategories();
+  const tabs = ['全部', ...cats];
+  if(!tabs.includes(activeTab)) activeTab = '全部';
+  wrap.innerHTML = tabs.map(t =>
+    `<button class="tab ${t===activeTab?'active':''}" onclick="setTab('${escapeAttr(t)}')">${escapeHtml(t)}</button>`
+  ).join('');
+}
+function setTab(t){ activeTab = t; renderTabs(); renderList(); }
+
+/* ---------------- List ---------------- */
+function renderList(){
+  const listEl = document.getElementById('list');
+  const q = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+  let items = files.slice().sort((a,b)=> b.updatedAt - a.updatedAt);
+  if(activeTab !== '全部'){
+    items = items.filter(f => (f.category || DEFAULT_CAT) === activeTab);
+  }
+  if(q){
+    items = items.filter(f => f.name.toLowerCase().includes(q) || f.content.toLowerCase().includes(q));
+  }
+  if(items.length === 0){
+    listEl.innerHTML = `<div class="empty"><div class="glyph">▢</div><p>暂时没有文件</p><div class="sub">点击右下角按钮新建或导入</div></div>`;
+    return;
+  }
+  listEl.innerHTML = items.map(f => `
+    <div class="file-card" onclick="openEditor('${f.id}')">
+      <div class="file-icon">${fileGlyph(f.name)}</div>
+      <div class="file-main">
+        <div class="file-name">${escapeHtml(f.name || '无标题')}</div>
+        <div class="file-meta">
+          <span class="cat-chip">${escapeHtml(f.category || DEFAULT_CAT)}</span>
+          <span class="dot"></span>
+          <span>${formatDate(f.updatedAt)}</span>
+        </div>
+      </div>
+      <button class="file-more" onclick="event.stopPropagation(); openFileMenuFor('${f.id}')">•••</button>
+    </div>
+  `).join('');
+}
+function fileGlyph(name){
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if(['md','markdown'].includes(ext)) return '𝐌';
+  if(ext === 'html' || ext === 'htm') return '⌘';
+  if(ext === 'csv') return '▦';
+  if(ext === 'json') return '{}';
+  return '≡';
+}
+function formatDate(ts){
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if(sameDay) return d.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+  return d.toLocaleDateString('zh-CN', {month:'numeric', day:'numeric'});
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s){ return escapeHtml(s).replace(/`/g,'&#96;'); }
+
+/* ---------------- FAB ---------------- */
+function toggleFab(){
+  document.getElementById('fabMenu').classList.toggle('open');
+  document.getElementById('fabBtn').classList.toggle('rot');
+}
+function closeFab(){
+  document.getElementById('fabMenu').classList.remove('open');
+  document.getElementById('fabBtn').classList.remove('rot');
+}
+
+/* ---------------- New file ---------------- */
+function openNewFileModal(){
+  closeFab();
+  document.getElementById('newFileName').value = '';
+  document.getElementById('newFileCategory').value = '';
+  fillDatalist('catList');
+  showModal('newFileModal');
+}
+function fillDatalist(id){
+  document.getElementById(id).innerHTML = getCategories().map(c=>`<option value="${escapeAttr(c)}">`).join('');
+}
+async function confirmNewFile(){
+  const name = document.getElementById('newFileName').value.trim() || '未命名文件';
+  const category = document.getElementById('newFileCategory').value.trim() || DEFAULT_CAT;
+  const f = {id: uid(), name, category, content:'', updatedAt: Date.now()};
+  files.push(f);
+  await persist();
+  closeModal('newFileModal');
+  renderTabs(); renderList();
+  openEditor(f.id);
+}
+
+/* ---------------- Import ---------------- */
+function triggerImport(){
+  closeFab();
+  document.getElementById('importInput').click();
+}
+async function handleImport(ev){
+  const list = Array.from(ev.target.files || []);
+  if(list.length === 0) return;
+  for(const file of list){
+    const text = await file.text().catch(()=> '');
+    files.push({
+      id: uid(),
+      name: file.name,
+      category: DEFAULT_CAT,
+      content: text,
+      updatedAt: Date.now()
+    });
+  }
+  await persist();
+  renderTabs(); renderList();
+  showToast(list.length > 1 ? `已导入 ${list.length} 个文件` : '导入成功');
+  ev.target.value = '';
+}
+
+/* ---------------- Editor ---------------- */
+function findFile(id){ return files.find(f => f.id === id); }
+function openEditor(id){
+  currentId = id;
+  const f = findFile(id);
+  if(!f) return;
+  document.getElementById('nameInput').value = f.name;
+  document.getElementById('editorBody').value = f.content;
+  renderCatRow();
+  setSaveStatus('已保存');
+  resetSearchBar();
+  document.getElementById('editor').classList.add('open');
+}
+function closeEditor(){
+  document.getElementById('editor').classList.remove('open');
+  currentId = null;
+  resetSearchBar();
+  renderTabs(); renderList();
+}
+function renderCatRow(){
+  const f = findFile(currentId);
+  if(!f) return;
+  const cats = Array.from(new Set([...getCategories()]));
+  const cur = f.category || DEFAULT_CAT;
+  const wrap = document.getElementById('catRow');
+  wrap.innerHTML = cats.map(c =>
+    `<button class="cat-pill ${c===cur?'active':''}" onclick="setCurrentCategory('${escapeAttr(c)}')">${escapeHtml(c)}</button>`
+  ).join('') + `<button class="cat-pill add" onclick="changeCategoryPrompt()">＋ 新分类</button>`;
+}
+async function setCurrentCategory(c){
+  const f = findFile(currentId);
+  if(!f) return;
+  f.category = c;
+  f.updatedAt = Date.now();
+  await persist();
+  renderCatRow();
+}
+function scheduleSave(){
+  setSaveStatus('正在保存…');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    const f = findFile(currentId);
+    if(!f) return;
+    f.name = document.getElementById('nameInput').value.trim() || '未命名文件';
+    f.content = document.getElementById('editorBody').value;
+    f.updatedAt = Date.now();
+    await persist();
+  }, 500);
+}
+function setSaveStatus(s){ document.getElementById('saveStatus').textContent = s; }
+
+/* ---------------- In-document search ---------------- */
+let searchMatches = [];
+let searchIndex = -1;
+
+function toggleSearchBar(){
+  const bar = document.getElementById('searchBar');
+  const isOpen = bar.style.display === 'flex';
+  if(isOpen){
+    resetSearchBar();
+  }else{
+    bar.style.display = 'flex';
+    const input = document.getElementById('searchTermInput');
+    input.value = '';
+    setTimeout(()=> input.focus(), 50);
+    updateSearchUI();
+  }
+}
+function closeSearchBar(){ resetSearchBar(); }
+function resetSearchBar(){
+  document.getElementById('searchBar').style.display = 'none';
+  document.getElementById('searchTermInput').value = '';
+  searchMatches = [];
+  searchIndex = -1;
+  updateSearchUI();
+}
+function onSearchInput(){
+  const term = document.getElementById('searchTermInput').value;
+  computeMatches(term);
+  if(searchMatches.length > 0){
+    searchIndex = 0;
+    selectMatch(searchIndex);
+  }else{
+    searchIndex = -1;
+  }
+  updateSearchUI();
+}
+function onSearchKeydown(ev){
+  if(ev.key === 'Enter'){
+    ev.preventDefault();
+    jumpMatch(ev.shiftKey ? -1 : 1);
+  }else if(ev.key === 'Escape'){
+    resetSearchBar();
+  }
+}
+function computeMatches(term){
+  searchMatches = [];
+  if(!term) return;
+  const content = document.getElementById('editorBody').value;
+  const lowerContent = content.toLowerCase();
+  const lowerTerm = term.toLowerCase();
+  let from = 0;
+  while(true){
+    const found = lowerContent.indexOf(lowerTerm, from);
+    if(found === -1) break;
+    searchMatches.push({start: found, end: found + term.length});
+    from = found + term.length;
+  }
+}
+function selectMatch(i){
+  if(i < 0 || i >= searchMatches.length) return;
+  const m = searchMatches[i];
+  const ta = document.getElementById('editorBody');
+  ta.focus();
+  ta.setSelectionRange(m.start, m.end);
+}
+function jumpMatch(dir){
+  if(searchMatches.length === 0) return;
+  searchIndex = (searchIndex + dir + searchMatches.length) % searchMatches.length;
+  selectMatch(searchIndex);
+  updateSearchUI();
+}
+function updateSearchUI(){
+  const countEl = document.getElementById('searchCount');
+  const prevBtn = document.getElementById('searchPrevBtn');
+  const nextBtn = document.getElementById('searchNextBtn');
+  const has = searchMatches.length > 0;
+  countEl.textContent = has ? (searchIndex + 1) + '/' + searchMatches.length : '0/0';
+  prevBtn.disabled = !has;
+  nextBtn.disabled = !has;
+}
+
+/* ---------------- File menu (rename / category / delete / duplicate) ---------------- */
+let menuTargetId = null;
+function openFileMenu(){ menuTargetId = currentId; showSheet('fileMenuSheet'); }
+function openFileMenuFor(id){ menuTargetId = id; showSheet('fileMenuSheet'); }
+
+function renameCurrentFile(){
+  const f = findFile(menuTargetId);
+  if(!f) return;
+  closeAllOverlays();
+  document.getElementById('renameInput').value = f.name;
+  showModal('renameModal');
+}
+async function confirmRename(){
+  const f = findFile(menuTargetId);
+  if(!f) return;
+  f.name = document.getElementById('renameInput').value.trim() || f.name;
+  f.updatedAt = Date.now();
+  await persist();
+  closeModal('renameModal');
+  if(currentId === f.id) document.getElementById('nameInput').value = f.name;
+  renderTabs(); renderList();
+}
+
+function changeCategoryPrompt(){
+  if(!menuTargetId) menuTargetId = currentId;
+  const f = findFile(menuTargetId);
+  if(!f) return;
+  closeAllOverlays();
+  document.getElementById('catModalInput').value = f.category || '';
+  fillDatalist('catList2');
+  showModal('catModal');
+}
+async function confirmCategory(){
+  const f = findFile(menuTargetId);
+  if(!f) return;
+  f.category = document.getElementById('catModalInput').value.trim() || DEFAULT_CAT;
+  f.updatedAt = Date.now();
+  await persist();
+  closeModal('catModal');
+  renderTabs(); renderList();
+  if(currentId === f.id) renderCatRow();
+}
+
+async function duplicateCurrentFile(){
+  const f = findFile(menuTargetId);
+  if(!f) return;
+  const copy = {...f, id: uid(), name: f.name + ' 副本', updatedAt: Date.now()};
+  files.push(copy);
+  await persist();
+  closeAllOverlays();
+  renderTabs(); renderList();
+  showToast('已复制');
+}
+
+async function deleteCurrentFile(){
+  const f = findFile(menuTargetId);
+  if(!f) return;
+  files = files.filter(x => x.id !== f.id);
+  await persist();
+  closeAllOverlays();
+  if(currentId === f.id){ currentId = null; document.getElementById('editor').classList.remove('open'); }
+  renderTabs(); renderList();
+  showToast('已删除');
+}
+
+/* ---------------- Export ---------------- */
+function openExportSheet(){ showSheet('exportSheet'); }
+
+function exportFile(format){
+  const f = findFile(currentId);
+  if(!f){ closeAllOverlays(); return; }
+  const base = (f.name || 'untitled').replace(/\.[^.]+$/, '');
+  closeAllOverlays();
+  try{
+    if(format === 'txt') downloadBlob(f.content, base + '.txt', 'text/plain;charset=utf-8');
+    else if(format === 'md') downloadBlob(f.content, base + '.md', 'text/markdown;charset=utf-8');
+    else if(format === 'html') downloadBlob(toHtml(f), base + '.html', 'text/html;charset=utf-8');
+    else if(format === 'pdf') exportPdf(f, base);
+    else if(format === 'docx') exportDocx(f, base);
+    showToast('已导出 ' + format.toUpperCase());
+  }catch(e){
+    showToast('导出失败，请重试');
+  }
+}
+function downloadBlob(data, filename, mime){
+  const blob = new Blob([data], {type: mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=> URL.revokeObjectURL(url), 2000);
+}
+function toHtml(f){
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(f.name)}</title>
+<style>body{font-family:-apple-system,'PingFang SC',sans-serif; max-width:720px; margin:40px auto; padding:0 20px; line-height:1.7; color:#1C1C1E; white-space:pre-wrap;}</style>
+</head><body>${escapeHtml(f.content)}</body></html>`;
+}
+function exportPdf(f, base){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:'pt', format:'a4'});
+  const marginX = 48, marginY = 56, maxWidth = 500;
+  doc.setFont('helvetica', '');
+  doc.setFontSize(11);
+  const lines = doc.splitTextToSize(f.content || ' ', maxWidth);
+  let y = marginY;
+  const lineHeight = 15;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  lines.forEach(line => {
+    if(y > pageHeight - marginY){ doc.addPage(); y = marginY; }
+    doc.text(line, marginX, y);
+    y += lineHeight;
+  });
+  doc.save(base + '.pdf');
+}
+async function exportDocx(f, base){
+  const zip = new JSZip();
+  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const paras = (f.content || '').split('\n').map(line =>
+    `<w:p><w:r><w:t xml:space="preserve">${esc(line) || ''}</w:t></w:r></w:p>`
+  ).join('');
+  zip.file('[Content_Types].xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`);
+  zip.folder('_rels').file('.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`);
+  zip.folder('word').file('document.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>${paras}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr></w:body>
+</w:document>`);
+  const blob = await zip.generateAsync({type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = base + '.docx';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=> URL.revokeObjectURL(url), 2000);
+}
+
+/* ---------------- Overlays ---------------- */
+function showSheet(id){
+  document.getElementById('scrim').classList.add('show');
+  document.getElementById(id).classList.add('show');
+}
+function showModal(id){
+  document.getElementById('scrim').classList.add('show');
+  document.getElementById(id).classList.add('show');
+}
+function closeModal(id){
+  document.getElementById(id).classList.remove('show');
+  document.getElementById('scrim').classList.remove('show');
+}
+function closeAllOverlays(){
+  document.querySelectorAll('.sheet, .modal').forEach(el => el.classList.remove('show'));
+  document.getElementById('scrim').classList.remove('show');
+}
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=> t.classList.remove('show'), 1800);
+}
+</script>
+</body>
+</html>
